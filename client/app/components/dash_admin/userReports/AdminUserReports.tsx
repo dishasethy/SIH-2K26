@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { User, Phone, MapPin, Calendar, FileText, Trash2, RefreshCw, Eye, Search, AlertCircle } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
 interface IncidentReport {
   _id: string;
@@ -26,7 +27,7 @@ export default function AdminUserReports() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("http://localhost:5000/api/incidents");
+      const response = await fetch(apiUrl("/api/incidents"));
       if (!response.ok) {
         throw new Error("Failed to load user reports");
       }
@@ -45,7 +46,7 @@ export default function AdminUserReports() {
 
     setActionStatus("Processing deletion...");
     try {
-      const response = await fetch(`http://localhost:5000/api/incidents/${id}`, {
+      const response = await fetch(apiUrl(`/api/incidents/${id}`), {
         method: "DELETE",
       });
 

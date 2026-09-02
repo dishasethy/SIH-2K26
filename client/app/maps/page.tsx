@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import DashboardLayout from "@/app/components/dash_user/DashboardLayout";
-import { MapPin, RefreshCw } from "lucide-react";
+import { MapPin, RefreshCw, AlertTriangle, Clock3 } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
 // Dynamically import map component with no SSR to support browser window APIs
 const MapComponent = dynamic(
@@ -21,12 +22,20 @@ const MapComponent = dynamic(
 
 interface IncidentReport {
   _id: string;
+  incidentId?: string;
   name: string;
   mobileNumber: string;
   latitude: number;
   longitude: number;
+  locationAccuracy?: number;
+  disasterType?: string;
+  peopleAffected?: number;
+  severity?: string;
+  description?: string;
   notes?: string;
   image?: string;
+  media?: string[];
+  status?: string;
   createdAt: string;
 }
 
@@ -39,7 +48,7 @@ export default function MapsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("http://localhost:5000/api/incidents");
+      const response = await fetch(apiUrl("/api/incidents"));
       if (!response.ok) {
         throw new Error("Failed to load map incidents.");
       }
@@ -56,6 +65,21 @@ export default function MapsPage() {
   useEffect(() => {
     fetchIncidents();
   }, []);
+
+  const getSeverityStyles = (severity?: string) => {
+    switch (severity) {
+      case "Critical":
+        return "bg-red-500/10 text-red-700 border-red-200";
+      case "High":
+        return "bg-orange-500/10 text-orange-700 border-orange-200";
+      case "Medium":
+        return "bg-yellow-500/10 text-yellow-700 border-yellow-200";
+      case "Low":
+        return "bg-emerald-500/10 text-emerald-700 border-emerald-200";
+      default:
+        return "bg-slate-500/10 text-slate-700 border-slate-200";
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -90,6 +114,7 @@ export default function MapsPage() {
         <div className="relative">
           <MapComponent incidents={incidents} />
         </div>
+
       </div>
     </DashboardLayout>
   );

@@ -5,8 +5,10 @@ import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import prisma from "./prisma";
 import bcrypt from "bcryptjs";
 
+const adapter = process.env.DATABASE_URL ? PrismaAdapter(prisma) : undefined;
+
 export const authOptions: AuthOptions = {
-  adapter: PrismaAdapter(prisma),
+  ...(adapter ? { adapter } : {}),
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || "google-client-id-placeholder",
@@ -21,6 +23,10 @@ export const authOptions: AuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Please enter your login details");
+        }
+
+        if (!process.env.DATABASE_URL) {
+          throw new Error("Database is not configured. Set DATABASE_URL in your deployment environment.");
         }
 
         const input = credentials.email.trim();
@@ -93,14 +99,24 @@ export const authOptions: AuthOptions = {
       if (user) {
         token.id = user.id;
         token.role = (user as any).role || "user";
+        token.phone = (user as any).phone || null;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        const sessionUser = session.user as { id?: string; name?: string | null; email?: string | null; image?: string | null; role?: string };
+        const sessionUser = session.user as { id?: string; name?: string | null; email?: string | null; image?: string | null; role?: string; phone?: string | null };
         sessionUser.id = token.id as string;
         sessionUser.role = token.role as string;
+
+        const dbUser = token.id && token.id !== "admin"
+          ? await prisma.user.findUnique({
+              where: { id: token.id as string },
+              select: { phone: true },
+            })
+          : null;
+
+        sessionUser.phone = dbUser?.phone || (token.phone as string | null) || null;
       }
       return session;
     },

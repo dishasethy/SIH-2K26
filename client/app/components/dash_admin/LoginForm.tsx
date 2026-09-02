@@ -13,8 +13,8 @@ interface AdminLoginFormProps {
 
 export default function AdminLoginForm({ callbackUrl }: AdminLoginFormProps) {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState(process.env.NEXT_PUBLIC_ADMIN_USER || "");
+  const [password, setPassword] = useState(process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 

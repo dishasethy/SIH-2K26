@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "@/app/components/dash_user/DashboardLayout";
 import { Bell, User, Phone, MapPin, Calendar, FileText, RefreshCw, Eye } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
 interface IncidentReport {
   _id: string;
@@ -24,11 +25,13 @@ export default function NotificationsPage() {
   const fetchIncidents = async () => {
     setLoading(true);
     setError(null);
+
     try {
-      const response = await fetch("http://localhost:5000/api/incidents");
+      const response = await fetch(apiUrl("/api/incidents"));
       if (!response.ok) {
         throw new Error("Failed to retrieve coordination data.");
       }
+
       const data = await response.json();
       setIncidents(data);
     } catch (err: any) {
@@ -92,7 +95,7 @@ export default function NotificationsPage() {
               >
                 {/* Image Section */}
                 {incident.image && (
-                  <div className="md:w-48 shrink-0 relative rounded-2xl overflow-hidden shadow-inner bg-slate-900 flex items-center justify-center min-h-[140px]">
+                  <div className="md:w-48 shrink-0 relative rounded-2xl overflow-hidden shadow-inner bg-slate-900 flex items-center justify-center min-h-35">
                     <img
                       src={incident.image}
                       alt="Incident scene"
@@ -148,7 +151,7 @@ export default function NotificationsPage() {
       {/* Image Modal Lightbox */}
       {selectedImage && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 cursor-zoom-out"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 cursor-zoom-out"
           onClick={() => setSelectedImage(null)}
         >
           <div className="max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-slate-900 p-2 shadow-2xl relative">

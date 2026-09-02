@@ -1,85 +1,179 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import DashboardLayout from "@/app/components/dash_user/DashboardLayout";
-import { Send, MapPin, Upload, Phone, User, FileText, CheckCircle, AlertCircle } from "lucide-react";
+import { Send, MapPin, Upload, Phone, User, FileText, CheckCircle, AlertCircle, ShieldAlert } from "lucide-react";
+import { apiUrl } from "@/lib/api";
+
+const disasterOptions = [
+  "Flood",
+  "Landslide",
+  "Cyclone",
+  "Earthquake",
+  "Fire",
+  "Building Collapse",
+  "Industrial Accident",
+  "Other",
+];
+
+const severityOptions = ["Low", "Medium", "High", "Critical"];
 
 export default function SendInfoPage() {
+  const { data: session } = useSession();
+  const sessionPhone = (session?.user as any)?.phone || "";
+  const sessionName = session?.user?.name || "";
+
   const [formData, setFormData] = useState({
-    name: "",
-    mobileNumber: "",
+    name: sessionName,
+    mobileNumber: sessionPhone,
     latitude: "",
     longitude: "",
-    notes: "",
+    locationAccuracy: "",
+    disasterType: "Flood",
+    peopleAffected: "0",
+    severity: "Medium",
+    description: "",
   });
-  const [imageFile, setImageFile] = useState<string | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [mediaFiles, setMediaFiles] = useState<Array<{ type: "image" | "video"; url: string }>>([]);
   const [status, setStatus] = useState<{ type: "success" | "error" | "loading" | null; message: string }>({
     type: null,
     message: "",
   });
 
-  // Access browser geolocation
+  useEffect(() => {
+    if (sessionName) {
+      setFormData((prev) => ({ ...prev, name: sessionName }));
+    }
+    if (sessionPhone) {
+      setFormData((prev) => ({ ...prev, mobileNumber: sessionPhone }));
+    }
+  }, [sessionName, sessionPhone]);
+
+  const detectedLocationText = useMemo(() => {
+    if (!formData.latitude || !formData.longitude) return "No location captured yet";
+    return `${formData.latitude}, ${formData.longitude}${formData.locationAccuracy ? ` • ±${formData.locationAccuracy} m` : ""}`;
+  }, [formData.latitude, formData.longitude, formData.locationAccuracy]);
+
   const handleDetectLocation = () => {
     if (!navigator.geolocation) {
       setStatus({ type: "error", message: "Geolocation is not supported by your browser." });
       return;
     }
 
-    setStatus({ type: "loading", message: "Detecting location..." });
+    setStatus({ type: "loading", message: "Detecting emergency location..." });
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setFormData((prev) => ({
           ...prev,
           latitude: position.coords.latitude.toFixed(6),
           longitude: position.coords.longitude.toFixed(6),
+          locationAccuracy: Math.round(position.coords.accuracy).toString(),
         }));
-        setStatus({ type: "success", message: "Location detected successfully!" });
-        // Clear success message after 2s
-        setTimeout(() => setStatus({ type: null, message: "" }), 2000);
+        setStatus({ type: "success", message: "GPS location captured successfully." });
+        setTimeout(() => setStatus({ type: null, message: "" }), 2200);
       },
       (error) => {
         console.error("Location error:", error);
-        setStatus({ type: "error", message: "Unable to retrieve location. Please type manually." });
+        setStatus({ type: "error", message: "Unable to fetch GPS location. Please allow location access." });
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 15000 }
     );
   };
 
-  // Convert uploaded image to Base64
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleMediaChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
-    // Check size (limit to 5MB for base64)
-    if (file.size > 5 * 1024 * 1024) {
-      setStatus({ type: "error", message: "Image exceeds 5MB size limit." });
+    const allowedTypes = ["image/", "video/"];
+    if (!allowedTypes.some((prefix) => file.type.startsWith(prefix))) {
+      setStatus({ type: "error", message: "Please upload an image or video only." });
+      return;
+    }
+
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setStatus({ type: "error", message: "Uploaded file must be 10MB or smaller." });
       return;
     }
 
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64String = reader.result as string;
-      setImageFile(base64String);
-      setImagePreview(base64String);
+      const nextEntry: { type: "image" | "video"; url: string } = {
+        type: file.type.startsWith("video/") ? "video" : "image",
+        url: base64String,
+      };
+
+      setMediaFiles((prev) => [nextEntry, ...prev].slice(0, 2));
+      setStatus({ type: "success", message: "Evidence attached successfully." });
+      setTimeout(() => setStatus({ type: null, message: "" }), 1500);
     };
     reader.readAsDataURL(file);
+    event.target.value = "";
   };
 
-  // Form submit handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { name, mobileNumber, latitude, longitude, notes } = formData;
+    const {
+      name,
+      mobileNumber,
+      latitude,
+      longitude,
+      locationAccuracy,
+      disasterType,
+      peopleAffected,
+      severity,
+      description,
+    } = formData;
 
-    if (!name || !mobileNumber || !latitude || !longitude) {
-      setStatus({ type: "error", message: "Please fill out all required fields." });
+    if (!name || !mobileNumber) {
+      setStatus({ type: "error", message: "Reporter name and contact are required." });
       return;
     }
 
-    setStatus({ type: "loading", message: "Submitting report to coordination command..." });
+    if (!latitude || !longitude) {
+      setStatus({ type: "error", message: "Your GPS location is required before submitting." });
+      return;
+    }
+
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    const affectedCount = Number(peopleAffected);
+    const accuracy = Number(locationAccuracy || 0);
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      setStatus({ type: "error", message: "Latitude is invalid." });
+      return;
+    }
+
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+      setStatus({ type: "error", message: "Longitude is invalid." });
+      return;
+    }
+
+    if (!Number.isInteger(affectedCount) || affectedCount < 0) {
+      setStatus({ type: "error", message: "People affected must be a non-negative number." });
+      return;
+    }
+
+    if (!description.trim() || description.trim().length < 5) {
+      setStatus({ type: "error", message: "Please add a brief description of the emergency." });
+      return;
+    }
+
+    if (accuracy < 0 || accuracy > 10000) {
+      setStatus({ type: "error", message: "Location accuracy is invalid." });
+      return;
+    }
+
+    setStatus({ type: "loading", message: "Submitting emergency report..." });
+
+    const mediaUrls = mediaFiles.map((item) => item.url);
 
     try {
-      const response = await fetch("http://localhost:5000/api/incidents", {
+      const response = await fetch(apiUrl("/api/incidents"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -87,50 +181,52 @@ export default function SendInfoPage() {
         body: JSON.stringify({
           name,
           mobileNumber,
-          latitude: parseFloat(latitude),
-          longitude: parseFloat(longitude),
-          notes,
-          image: imageFile, // base64 string
+          latitude: lat,
+          longitude: lng,
+          locationAccuracy: accuracy,
+          disasterType,
+          peopleAffected: affectedCount,
+          severity,
+          description: description.trim(),
+          media: mediaUrls,
+          image: mediaUrls[0] || null,
+          notes: description.trim(),
         }),
       });
 
       const result = await response.json();
 
       if (response.ok && result.success) {
-        setStatus({ type: "success", message: "Incident information submitted and logged to MongoDB successfully!" });
-        // Reset form
+        setStatus({ type: "success", message: "Emergency report submitted successfully." });
         setFormData({
-          name: "",
-          mobileNumber: "",
+          name: sessionName,
+          mobileNumber: sessionPhone,
           latitude: "",
           longitude: "",
-          notes: "",
+          locationAccuracy: "",
+          disasterType: "Flood",
+          peopleAffected: "0",
+          severity: "Medium",
+          description: "",
         });
-        setImageFile(null);
-        setImagePreview(null);
+        setMediaFiles([]);
       } else {
-        setStatus({ type: "error", message: result.error || "Failed to submit incident information." });
+        setStatus({ type: "error", message: result.error || "Failed to submit emergency report." });
       }
-    } catch (err) {
-      console.error("Submission error:", err);
-      setStatus({ type: "error", message: "Network connection to database API failed." });
+    } catch (error) {
+      console.error("Submission error:", error);
+      setStatus({ type: "error", message: "Network connection to backend failed." });
     }
   };
 
   return (
     <DashboardLayout>
       <div className="max-w-2xl mx-auto">
-        {/* Title */}
         <div className="text-center mb-8">
-          <h2 className="text-3xl font-extrabold tracking-tight uppercase mb-2">
-            Send Information
-          </h2>
-          <p className="text-slate-500 text-xs">
-            Report local incidents, damage, or resource needs directly to the coordination command center.
-          </p>
+          <h2 className="text-3xl font-extrabold tracking-tight uppercase mb-2">Citizen Emergency Report</h2>
+          <p className="text-slate-500 text-xs">Share critical local conditions with the coordination command center.</p>
         </div>
 
-        {/* Status Messages */}
         {status.type && (
           <div
             className={`mb-6 p-4 rounded-xl flex items-start gap-3 transition-all duration-300 animate-pulse ${
@@ -150,9 +246,7 @@ export default function SendInfoPage() {
           </div>
         )}
 
-        {/* Form panel */}
-        <form onSubmit={handleSubmit} className="neu-flat p-8 rounded-3xl space-y-6">
-          {/* Name & Mobile Number */}
+        <form onSubmit={handleSubmit} className="neu-flat p-6 md:p-8 rounded-3xl space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
@@ -161,9 +255,9 @@ export default function SendInfoPage() {
               <div className="neu-sunken neu-sunken-focus rounded-xl flex items-center px-3 py-2.5">
                 <input
                   type="text"
-                  placeholder="Enter full name"
                   value={formData.name}
                   onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="Enter your full name"
                   className="w-full bg-transparent border-none outline-none text-sm placeholder-slate-400 font-medium"
                   required
                 />
@@ -172,14 +266,15 @@ export default function SendInfoPage() {
 
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <Phone className="h-3.5 w-3.5" /> Mobile Number <span className="text-red-500">*</span>
+                <Phone className="h-3.5 w-3.5" /> Contact Number <span className="text-red-500">*</span>
               </label>
               <div className="neu-sunken neu-sunken-focus rounded-xl flex items-center px-3 py-2.5">
                 <input
                   type="tel"
-                  placeholder="Enter mobile number"
                   value={formData.mobileNumber}
                   onChange={(e) => setFormData((prev) => ({ ...prev, mobileNumber: e.target.value }))}
+                  placeholder={sessionPhone ? "Using your account phone number" : "Enter mobile number"}
+                  readOnly={!!sessionPhone}
                   className="w-full bg-transparent border-none outline-none text-sm placeholder-slate-400 font-medium"
                   required
                 />
@@ -187,39 +282,52 @@ export default function SendInfoPage() {
             </div>
           </div>
 
-          {/* Coordinates Detect and Input */}
           <div className="space-y-3">
-            <div className="flex justify-between items-center">
+            <div className="flex items-center justify-between gap-3">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5" /> Coordinates <span className="text-red-500">*</span>
+                <MapPin className="h-3.5 w-3.5" /> Location <span className="text-red-500">*</span>
               </label>
               <button
                 type="button"
                 onClick={handleDetectLocation}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider neu-flat-interactive cursor-pointer text-slate-600 hover:text-emerald-700"
               >
-                <MapPin className="h-3.5 w-3.5" /> Auto-Detect
+                <MapPin className="h-3.5 w-3.5" /> Auto-detect GPS
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-emerald-700 font-medium">
+              {detectedLocationText}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <ShieldAlert className="h-3.5 w-3.5" /> Disaster Type <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={formData.disasterType}
+                onChange={(e) => setFormData((prev) => ({ ...prev, disasterType: e.target.value }))}
+                className="w-full rounded-xl neu-sunken py-2.5 px-3 text-sm text-slate-200 outline-none border border-slate-700/50 bg-slate-950/40"
+              >
+                {disasterOptions.map((option) => (
+                  <option key={option} value={option} className="bg-slate-900 text-white">{option}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <User className="h-3.5 w-3.5" /> People Affected <span className="text-red-500">*</span>
+              </label>
               <div className="neu-sunken neu-sunken-focus rounded-xl flex items-center px-3 py-2.5">
                 <input
                   type="number"
-                  step="any"
-                  placeholder="Latitude (e.g. 28.6139)"
-                  value={formData.latitude}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, latitude: e.target.value }))}
-                  className="w-full bg-transparent border-none outline-none text-sm placeholder-slate-400 font-medium"
-                  required
-                />
-              </div>
-              <div className="neu-sunken neu-sunken-focus rounded-xl flex items-center px-3 py-2.5">
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Longitude (e.g. 77.2090)"
-                  value={formData.longitude}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, longitude: e.target.value }))}
+                  min="0"
+                  step="1"
+                  value={formData.peopleAffected}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, peopleAffected: e.target.value }))}
                   className="w-full bg-transparent border-none outline-none text-sm placeholder-slate-400 font-medium"
                   required
                 />
@@ -227,83 +335,84 @@ export default function SendInfoPage() {
             </div>
           </div>
 
-          {/* Upload Image Section */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <Upload className="h-3.5 w-3.5" /> Incident Photograph
-            </label>
-            <div className="flex flex-col items-center gap-4 p-6 border-2 border-dashed border-slate-300 rounded-2xl bg-slate-50/50 hover:bg-slate-100/50 transition-all">
-              {imagePreview ? (
-                <div className="relative group rounded-xl overflow-hidden shadow-md w-full max-h-48 flex justify-center bg-black">
-                  <img
-                    src={imagePreview}
-                    alt="Upload preview"
-                    className="max-h-48 object-contain"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImageFile(null);
-                      setImagePreview(null);
-                    }}
-                    className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-700 text-white rounded-lg p-1.5 text-xs font-bold uppercase tracking-wider shadow"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="p-3 rounded-full neu-sunken text-slate-400">
-                    <Upload className="h-6 w-6" />
-                  </div>
-                  <div className="text-center">
-                    <span className="text-xs text-slate-500 font-semibold">
-                      Drag image here or click to browse
-                    </span>
-                    <p className="text-[10px] text-slate-400 mt-1 uppercase">JPG, PNG up to 5MB</p>
-                  </div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer hidden"
-                    id="file-upload"
-                  />
-                  <label
-                    htmlFor="file-upload"
-                    className="px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider neu-flat-interactive cursor-pointer text-slate-600"
-                  >
-                    Select File
-                  </label>
-                </>
-              )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <AlertCircle className="h-3.5 w-3.5" /> Severity <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={formData.severity}
+                onChange={(e) => setFormData((prev) => ({ ...prev, severity: e.target.value }))}
+                className="w-full rounded-xl neu-sunken py-2.5 px-3 text-sm text-slate-200 outline-none border border-slate-700/50 bg-slate-950/40"
+              >
+                {severityOptions.map((option) => (
+                  <option key={option} value={option} className="bg-slate-900 text-white">{option}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5" /> Accuracy
+              </label>
+              <div className="neu-sunken neu-sunken-focus rounded-xl flex items-center px-3 py-2.5 text-sm text-slate-200">
+                {formData.locationAccuracy ? `±${formData.locationAccuracy} m` : "Not yet detected"}
+              </div>
             </div>
           </div>
 
-          {/* Notes */}
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <FileText className="h-3.5 w-3.5" /> Additional Notes
+              <FileText className="h-3.5 w-3.5" /> Description <span className="text-red-500">*</span>
             </label>
             <div className="neu-sunken neu-sunken-focus rounded-xl p-3">
               <textarea
-                placeholder="Describe the incident, status, severity, or immediate requirements..."
-                value={formData.notes}
-                onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
+                value={formData.description}
+                onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
                 rows={4}
+                placeholder="Briefly describe what is happening and any immediate danger."
                 className="w-full bg-transparent border-none outline-none text-sm placeholder-slate-400 font-medium resize-none text-foreground"
+                required
               />
             </div>
           </div>
 
-          {/* Submit Button */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Upload className="h-3.5 w-3.5" /> Evidence (Optional)
+            </label>
+            <div className="flex flex-col gap-3 rounded-2xl border-2 border-dashed border-slate-300 p-4">
+              <div className="flex items-center gap-3">
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  onChange={handleMediaChange}
+                  className="block w-full text-xs text-slate-500 file:mr-4 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white"
+                />
+              </div>
+
+              {mediaFiles.length > 0 && (
+                <div className="grid grid-cols-1 gap-3">
+                  {mediaFiles.map((entry, index) => (
+                    <div key={`${entry.type}-${index}`} className="rounded-xl overflow-hidden border border-slate-300 bg-slate-950/30">
+                      {entry.type === "image" ? (
+                        <img src={entry.url} alt="Evidence preview" className="max-h-56 w-full object-cover" />
+                      ) : (
+                        <video src={entry.url} controls className="max-h-56 w-full object-cover" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           <button
             type="submit"
             className="w-full py-3.5 rounded-2xl neu-green-flat text-white font-bold uppercase tracking-wider text-xs flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform cursor-pointer"
-            submit-btn=""
           >
             <Send className="h-4 w-4" />
-            <span>Submit Report</span>
+            <span>Submit Emergency Report</span>
           </button>
         </form>
       </div>
